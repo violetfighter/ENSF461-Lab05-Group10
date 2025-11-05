@@ -10,6 +10,15 @@ static void* _arena_start = NULL; // pointer to the start of the memory arena
 static void* _arena_end = NULL; // pointer to the end of the memory arena
 static size_t arena_size = 0;
 
+typedef struct chunk {
+    size_t size;          // size of the data area
+    int free;             // 1 = free, 0 = allocated
+    struct chunk* next;   // next chunk in linked list
+} chunk_t;
+
+static node_t* free_list = NULL;
+static chunk_t* chunk_list_head = NULL;
+
 //Part 1
 //*****************************************************
 
@@ -67,6 +76,14 @@ int myinit(size_t size){
     printf("...arena starts at %p\n", _arena_start);
     printf("...arena ends at %p\n", _arena_end);
 
+    node_t* head = (node_t*)_arena_start;
+    head->size = arena_size - sizeof(node_t);
+    head->is_free = 1;
+    head->fwd = NULL;
+    head->bwd = NULL;
+    free_list = head;  
+
+
     return arena_size;
 
 }
@@ -90,4 +107,61 @@ int mydestroy() {
         statusno = ERR_UNINITIALIZED;
         return ERR_UNINITIALIZED; 
     }
+}
+
+//***************************************************** 
+
+//Part 4
+//*****************************************************
+
+void* myalloc(size_t size) {
+    if (_arena_start == NULL) { statusno = ERR_UNINITIALIZED; return NULL; }
+    if (size == 0) { statusno = ERR_BAD_ARGUMENTS; return NULL; }
+
+    node_t* current = free_list;
+
+    while (current != NULL) {
+        if (current->is_free && current->size >= size) {
+            // Split if enough space
+            if (current->size >= size + sizeof(node_t) + 1) {
+                node_t* new_node = (node_t*)((char*)current + sizeof(node_t) + size);
+                new_node->size = current->size - size - sizeof(node_t);
+                new_node->is_free = 1;
+                new_node->fwd = current->fwd;
+                new_node->bwd = current;
+                if (current->fwd) current->fwd->bwd = new_node;
+                current->fwd = new_node;
+                current->size = size;
+            }
+            current->is_free = 0;
+            statusno = 0;
+            return (void*)(current + 1);
+        }
+        current = current->fwd;
+    }
+
+    statusno = ERR_OUT_OF_MEMORY;
+    return NULL;
+}
+
+void myfree(void* ptr) {
+    if (_arena_start == NULL) { statusno = ERR_UNINITIALIZED; return; }
+    if (ptr == NULL) { statusno = ERR_BAD_ARGUMENTS; return; }
+
+    node_t* node = (node_t*)ptr - 1;  // header is just before the pointer
+    node->is_free = 1;
+
+    if (node->fwd && node->fwd->is_free) {
+        node->size += sizeof(node_t) + node->fwd->size;
+        node->fwd = node->fwd->fwd;
+        if (node->fwd) node->fwd->bwd = node;
+    }
+
+    if (node->bwd && node->bwd->is_free) {
+        node->bwd->size += sizeof(node_t) + node->size;
+        node->bwd->fwd = node->fwd;
+        if (node->fwd) node->fwd->bwd = node->bwd;
+    }
+
+    statusno = 0;
 }
